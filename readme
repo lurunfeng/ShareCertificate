@@ -1,0 +1,2 @@
+1 pip install akshare pandas mplfinance numpy -i https://mirrors.aliyun.com/pypi/simple/
+

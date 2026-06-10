@@ -7,7 +7,7 @@ from requests.exceptions import ConnectionError
 
 STOCK_CODE = "300323"
 PERIOD = "daily"
-START_DATE = "20260605"
+START_DATE = "20260610"
 IS_FIRST_PLOT = True  # 只画一次图
 
 
