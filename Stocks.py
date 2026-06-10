@@ -1,10 +1,10 @@
-import efinance as ef
 import time
 import os
 import pandas as pd
 import random
 import requests
 import re
+from wcwidth import wcswidth
 
 # ====================== 持仓数据 ======================
 holdings = {
@@ -24,25 +24,65 @@ holdings = {
     "300129": {"name": "泰胜风能", "buy_price": 14.9016, "shares": 2300}
 }
 my_codes = list(holdings.keys())
-pd.set_option('display.unicode.ambiguous_as_wide', True)
-pd.set_option('display.unicode.east_asian_width', True)
 
-def get_display_width(s):
-    """计算字符串的显示宽度（中文算2，英文算1）"""
-    width = 0
-    for ch in str(s):
-        if '\u4e00' <= ch <= '\u9fff':
-            width += 2
-        else:
-            width += 1
-    return width
+# 颜色定义
+RED = "\033[31m"
+GREEN = "\033[32m"
+RESET = "\033[0m"
+
+# 固定列宽（单位：英文字符宽度，已经测试足够容纳所有内容）
+# 可根据你的终端微调这些值
+COL_WIDTHS = {
+    "代码": 8,
+    "名称": 10,
+    "最新价": 8,
+    "购入价": 8,
+    "持仓数": 8,
+    "总盈亏(元)": 10,
+    "总盈亏率": 10,
+    "当日盈亏(元)": 10,
+    "当日盈亏率": 10,
+}
+HEADERS = ["代码", "名称", "最新价", "购入价", "持仓数", "总盈亏(元)", "总盈亏率", "当日盈亏(元)", "当日盈亏率"]
+
+def visible_width(text):
+    """计算字符串的实际显示宽度（忽略 ANSI 颜色代码）"""
+    # 移除颜色代码
+    clean = re.sub(r'\033\[[0-9;]*m', '', str(text))
+    width = wcswidth(clean)
+    return width if width >= 0 else len(clean)
+
+def pad_cell(content, width, align='left'):
+    """
+    将单元格内容填充到指定显示宽度，支持内容中包含 ANSI 颜色代码。
+    颜色代码不占用显示宽度，填充空格被添加到颜色代码之外。
+    """
+    # 计算可视宽度（不含颜色）
+    cur_width = visible_width(content)
+    pad = width - cur_width
+    if pad <= 0:
+        return content
+    if align == 'left':
+        # 内容后加空格
+        return content + ' ' * pad
+    else:
+        # 内容前加空格（右对齐）
+        return ' ' * pad + content
+
+def color_num(value, fmt="{:.2f}", suffix=""):
+    """根据数值正负返回带颜色的字符串（正红负绿）"""
+    if value > 0:
+        color = RED
+    elif value < 0:
+        color = GREEN
+    else:
+        return f"{fmt.format(value)}{suffix}"
+    return f"{color}{fmt.format(value)}{suffix}{RESET}"
 
 def extract_code_from_line(line):
-    """从 var hq_str_sh600000 中提取原始股票代码 600000"""
     match = re.search(r'hq_str_(sh\d+|sz\d+)', line)
     if match:
-        code = match.group(1)
-        return code[2:]
+        return match.group(1)[2:]
     return None
 
 def fetch_data_with_retry(max_retries=3, retry_delay=5):
@@ -54,181 +94,159 @@ def fetch_data_with_retry(max_retries=3, retry_delay=5):
                     sina_codes.append(f"sh{code}")
                 elif code.startswith(('0', '3')):
                     sina_codes.append(f"sz{code}")
-                else:
-                    print(f"未知代码前缀: {code}")
-                    continue
             codes_str = ",".join(sina_codes)
-
             timestamp = int(time.time() * 1000)
             url = f"https://hq.sinajs.cn/rn={timestamp}&list={codes_str}"
-
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://finance.sina.com.cn"
-            }
-            response = requests.get(url, headers=headers, timeout=15)
-            response.encoding = 'gbk'
-
-            if response.status_code != 200:
-                raise Exception(f"HTTP {response.status_code}: {response.text[:100]}")
-
+            headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.encoding = 'gbk'
+            if resp.status_code != 200:
+                raise Exception(f"HTTP {resp.status_code}")
             rows = []
-            for line in response.text.strip().split("\n"):
+            for line in resp.text.strip().split("\n"):
                 if not line.strip():
                     continue
                 match = re.search(r'="(.*)"', line)
                 if not match:
                     continue
-                data_str = match.group(1)
-                fields = data_str.split(",")
-
+                fields = match.group(1).split(",")
                 if len(fields) >= 32:
-                    stock_code = extract_code_from_line(line)
-                    if stock_code is None:
+                    code = extract_code_from_line(line)
+                    if code is None:
                         continue
                     try:
                         rows.append({
-                            "股票代码": stock_code,
+                            "股票代码": code,
                             "股票名称": fields[0],
                             "最新价": float(fields[3]),
                             "昨日收盘价": float(fields[2])
                         })
-                    except (ValueError, IndexError) as e:
-                        print(f"数据转换错误 {stock_code}: {e}")
+                    except:
                         continue
-                else:
-                    print(f"字段数异常: {len(fields)}")
-
             if not rows:
-                raise Exception("未解析到任何股票数据")
-
+                raise Exception("无数据")
             df = pd.DataFrame(rows)
             df = df[df["股票代码"].isin(my_codes)]
             return df
-
         except Exception as e:
-            print(f"新浪接口请求失败 (尝试 {attempt+1}/{max_retries}): {e}")
+            print(f"请求失败 ({attempt+1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
-
-    raise Exception("新浪接口获取失败")
+    raise Exception("获取数据失败")
 
 # ====================== 主循环 ======================
 while True:
-    request_interval = random.uniform(60, 120)
+    request_interval = random.uniform(45, 90)
     time.sleep(request_interval)
-
     os.system("cls")
+
     try:
-        print(f"正在请求数据... (下次请求将在 {request_interval:.0f} 秒后)")
+        print(f"正在请求数据... (下次 {request_interval:.0f} 秒后)")
         df = fetch_data_with_retry()
 
-        # 添加持仓信息
+        # 添加持仓数据
         df["购入价"] = df["股票代码"].map(lambda x: holdings[x]["buy_price"])
         df["持仓数"] = df["股票代码"].map(lambda x: holdings[x]["shares"])
-
-        # 数值转换
         df["最新价"] = pd.to_numeric(df["最新价"])
         df["昨日收盘价"] = pd.to_numeric(df["昨日收盘价"])
         df["购入价"] = pd.to_numeric(df["购入价"])
         df["持仓数"] = pd.to_numeric(df["持仓数"])
-
-        # 计算盈亏
         df["总成本"] = df["购入价"] * df["持仓数"]
         df["当前市值"] = df["最新价"] * df["持仓数"]
         df["总盈亏_元"] = df["当前市值"] - df["总成本"]
         df["总盈亏率_%"] = (df["总盈亏_元"] / df["总成本"]) * 100
-
         df["当日盈亏_元"] = (df["最新价"] - df["昨日收盘价"]) * df["持仓数"]
         df["当日盈亏率_%"] = ((df["最新价"] - df["昨日收盘价"]) / df["昨日收盘价"]) * 100
 
         # 保留两位小数
-        cols_round = ["最新价", "昨日收盘价", "购入价", "总成本", "当前市值",
-                      "总盈亏_元", "总盈亏率_%", "当日盈亏_元", "当日盈亏率_%"]
-        df[cols_round] = df[cols_round].round(2)
+        for col in ["最新价", "购入价", "总盈亏_元", "总盈亏率_%", "当日盈亏_元", "当日盈亏率_%"]:
+            df[col] = df[col].round(2)
 
-        # ---------- 新增：按总盈亏金额降序排序（盈利在前） ----------
+        # 按总盈亏降序排序
         df = df.sort_values(by="总盈亏_元", ascending=False)
 
-        # ---------- 动态计算列宽 ----------
-        display_cols = ["股票代码", "股票名称", "最新价", "购入价", "持仓数", "总盈亏_元", "总盈亏率_%", "当日盈亏_元", "当日盈亏率_%"]
-        headers = {
-            "股票代码": "代码",
-            "股票名称": "名称",
-            "最新价": "最新价",
-            "购入价": "购入价",
-            "持仓数": "持仓数",
-            "总盈亏_元": "总盈亏(元)",
-            "总盈亏率_%": "总盈亏率",
-            "当日盈亏_元": "当日盈亏(元)",
-            "当日盈亏率_%": "当日盈亏率"
-        }
-
-        col_widths = {}
-        for col in display_cols:
-            header_text = headers[col]
-            header_width = get_display_width(header_text)
-            if col in ["最新价", "购入价", "总盈亏_元", "当日盈亏_元"]:
-                max_data = df[col].apply(lambda x: get_display_width(f"{x:.2f}")).max()
-            elif col in ["总盈亏率_%", "当日盈亏率_%"]:
-                max_data = df[col].apply(lambda x: get_display_width(f"{x:.2f}%")).max()
-            elif col == "持仓数":
-                max_data = df[col].apply(lambda x: get_display_width(f"{x:.0f}")).max()
-            else:
-                max_data = df[col].astype(str).apply(get_display_width).max()
-            col_widths[col] = max(header_width, max_data) + 1
-
-        total_width = sum(col_widths.values())
-        print("=" * total_width)
-
-        # 打印表头
+        # ----- 打印表头 -----
         header_line = ""
-        for col in display_cols:
-            header_text = headers[col]
-            if col in ["最新价", "购入价", "总盈亏_元", "总盈亏率_%", "当日盈亏_元", "当日盈亏率_%"]:
-                header_line += f"{header_text:>{col_widths[col]}}"
+        for h in HEADERS:
+            # 表头右移处理
+            if h == "代码":
+                display = "  代码"
+            elif h == "名称":
+                display = "  名称"
+            elif h == "最新价":
+                display = "    最新价"
+            elif h == "购入价":
+                display = "   购入价"
+            elif h == "持仓数":
+                display = "   持仓数"
+            elif h == "总盈亏(元)":
+                display = "   总盈亏(元)"
+            elif h == "总盈亏率":
+                display = "  总盈亏率"
+            elif h == "当日盈亏(元)":
+                display = " 当日盈亏(元)"
+            elif h == "当日盈亏率":
+                display = "  当日盈亏率"
             else:
-                header_line += f"{header_text:<{col_widths[col]}}"
+                display = h
+            align = 'left' if h in ["代码", "名称"] else 'right'
+            header_line += pad_cell(display, COL_WIDTHS[h], align)
+        total_width = sum(COL_WIDTHS.values())
+        print("=" * total_width)
         print(header_line)
         print("-" * total_width)
 
-        # 打印数据行
+        # ----- 打印数据行 -----
         for _, row in df.iterrows():
-            color_total = "\033[32m" if row["总盈亏_元"] >= 0 else "\033[31m"
-            color_daily = "\033[32m" if row["当日盈亏_元"] >= 0 else "\033[31m"
-            reset = "\033[0m"
+            # 构建每个单元格（带颜色）
+            cells = []
+            # 代码（无色）
+            cells.append(pad_cell(row["股票代码"], COL_WIDTHS["代码"], 'left'))
+            # 名称（无色）
+            cells.append(pad_cell(row["股票名称"], COL_WIDTHS["名称"], 'left'))
+            # 最新价（无色）
+            cells.append(pad_cell(f"{row['最新价']:.2f}", COL_WIDTHS["最新价"], 'right'))
+            # 购入价（无色）
+            cells.append(pad_cell(f"{row['购入价']:.2f}", COL_WIDTHS["购入价"], 'right'))
+            # 持仓数（无色）
+            cells.append(pad_cell(f"{row['持仓数']:.0f}", COL_WIDTHS["持仓数"], 'right'))
+            # 总盈亏(元)（带颜色）
+            total_pnl_str = color_num(row["总盈亏_元"])
+            cells.append(pad_cell(total_pnl_str, COL_WIDTHS["总盈亏(元)"], 'right'))
+            # 总盈亏率（带颜色）
+            total_rate_str = color_num(row["总盈亏率_%"], suffix="%")
+            cells.append(pad_cell(total_rate_str, COL_WIDTHS["总盈亏率"], 'right'))
+            # 当日盈亏(元)（带颜色）
+            daily_pnl_str = color_num(row["当日盈亏_元"])
+            cells.append(pad_cell(daily_pnl_str, COL_WIDTHS["当日盈亏(元)"], 'right'))
+            # 当日盈亏率（带颜色）
+            daily_rate_str = color_num(row["当日盈亏率_%"], suffix="%")
+            cells.append(pad_cell(daily_rate_str, COL_WIDTHS["当日盈亏率"], 'right'))
 
-            line = f"{row['股票代码']:<{col_widths['股票代码']}}"
-            line += f"{row['股票名称']:<{col_widths['股票名称']}}"
-            line += f"{row['最新价']:>{col_widths['最新价']}.2f}"
-            line += f"{row['购入价']:>{col_widths['购入价']}.2f}"
-            line += f"{row['持仓数']:>{col_widths['持仓数']}.0f}"
-            line += f"{color_total}{row['总盈亏_元']:>{col_widths['总盈亏_元']}.2f}{reset}"
-            line += f"{color_total}{row['总盈亏率_%']:>{col_widths['总盈亏率_%']}.2f}%{reset}"
-            line += f"{color_daily}{row['当日盈亏_元']:>{col_widths['当日盈亏_元']}.2f}{reset}"
-            line += f"{color_daily}{row['当日盈亏率_%']:>{col_widths['当日盈亏率_%']}.2f}%{reset}"
-            print(line)
+            print("".join(cells))
 
-        # 合计行
+        # ----- 合计行（无色）-----
         total_cost = df["总成本"].sum()
         total_pnl = df["总盈亏_元"].sum()
         total_daily_pnl = df["当日盈亏_元"].sum()
         total_pnl_rate = (total_pnl / total_cost) * 100 if total_cost != 0 else 0
 
-        total_line = f"{'合计':<{col_widths['股票代码']}}"
-        total_line += f"{'':<{col_widths['股票名称']}}"
-        total_line += f"{'':>{col_widths['最新价']}}"
-        total_line += f"{'':>{col_widths['购入价']}}"
-        total_line += f"{'':>{col_widths['持仓数']}}"
-        total_line += f"{total_pnl:>{col_widths['总盈亏_元']}.2f}"
-        total_line += f"{total_pnl_rate:>{col_widths['总盈亏率_%']}.2f}%"
-        total_line += f"{total_daily_pnl:>{col_widths['当日盈亏_元']}.2f}"
-        total_line += f"{'':>{col_widths['当日盈亏率_%']}}"
+        total_cells = [
+            pad_cell("合计", COL_WIDTHS["代码"], 'left'),
+            pad_cell("", COL_WIDTHS["名称"], 'left'),
+            pad_cell("", COL_WIDTHS["最新价"], 'right'),
+            pad_cell("", COL_WIDTHS["购入价"], 'right'),
+            pad_cell("", COL_WIDTHS["持仓数"], 'right'),
+            pad_cell(f"{total_pnl:.2f}", COL_WIDTHS["总盈亏(元)"], 'right'),
+            pad_cell(f"{total_pnl_rate:.2f}%", COL_WIDTHS["总盈亏率"], 'right'),
+            pad_cell(f"{total_daily_pnl:.2f}", COL_WIDTHS["当日盈亏(元)"], 'right'),
+            pad_cell("", COL_WIDTHS["当日盈亏率"], 'right'),
+        ]
         print("-" * total_width)
-        print(total_line)
+        print("".join(total_cells))
         print("=" * total_width)
         print("数据获取成功!")
 
     except Exception as e:
-        print(f"数据获取失败: {e}")
+        print(f"错误: {e}")
         time.sleep(30)
