@@ -1,100 +1,124 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-查询当日最热板块（行业/概念）以及涨幅前十的股票
-数据源：东方财富（通过 AKShare）
-"""
-
+import os
+import time
+import random
 import akshare as ak
 import pandas as pd
-from datetime import datetime
 
-# ================== 配置 ==================
-pd.set_option('display.max_rows', 20)
-pd.set_option('display.max_columns', 20)
-pd.set_option('display.width', 200)
-pd.set_option('display.unicode.ambiguous_as_wide', True)
-pd.set_option('display.unicode.east_asian_width', True)
+# 全局禁用代理，解决网络连接中断问题
+os.environ['NO_PROXY'] = '*'
+os.environ['HTTP_PROXY'] = ''
+os.environ['HTTPS_PROXY'] = ''
 
-# ================== 核心函数 ==================
+# 全局配置
+RETRY_TIMES = 3  # 接口最大重试次数
+BASE_SLEEP = 2  # 基础休眠秒数
 
-def get_top_industry_sectors(top_n=10):
-    """获取涨幅靠前的行业板块"""
+
+def fetch_with_retry(func):
+    """通用重试函数 + 随机延时，规避反爬，不再传入timeout参数"""
+    for idx in range(RETRY_TIMES):
+        try:
+            # 随机延时 2~4秒，模拟人工访问，降低限流概率
+            time.sleep(BASE_SLEEP + random.random() * 2)
+            return func()
+        except Exception as e:
+            print(f"第{idx + 1}次请求失败: {str(e)}")
+            time.sleep(BASE_SLEEP * (idx + 1))
+    print("多次重试失败，跳过当前接口")
+    return pd.DataFrame()
+
+
+def safe_convert_num(x):
+    """安全数值转换，过滤列表、空值、异常字符"""
+    if isinstance(x, (list, dict)):
+        return float("nan")
     try:
-        # 获取行业板块实时行情（东方财富）
-        df = ak.stock_board_industry_name_em()
-        # 按涨跌幅降序排序
-        df = df.sort_values(by="涨跌幅", ascending=False)
-        # 选择关键列并重命名
-        result = df[["板块名称", "最新价", "涨跌幅", "涨跌额", "总市值", "换手率"]].head(top_n)
-        return result
-    except Exception as e:
-        print(f"获取行业板块数据失败: {e}")
-        return None
+        return float(str(x).strip())
+    except (ValueError, TypeError):
+        return float("nan")
 
-def get_top_concept_sectors(top_n=10):
-    """获取涨幅靠前的概念板块"""
-    try:
-        df = ak.stock_board_concept_name_em()
-        df = df.sort_values(by="涨跌幅", ascending=False)
-        result = df[["板块名称", "最新价", "涨跌幅", "涨跌额", "总市值", "换手率"]].head(top_n)
-        return result
-    except Exception as e:
-        print(f"获取概念板块数据失败: {e}")
-        return None
 
-def get_top_stocks(top_n=10):
-    """获取全市场涨幅最高的前N只股票"""
-    try:
-        # 获取A股实时行情（含北交所）
-        df = ak.stock_zh_a_spot_em()
-        # 涨跌幅列可能名为 "涨跌幅" 或 "涨幅"
-        change_col = "涨跌幅" if "涨跌幅" in df.columns else "涨幅"
-        df = df.sort_values(by=change_col, ascending=False)
-        # 选择关键列
-        result = df[["代码", "名称", "最新价", change_col, "成交量", "成交额", "振幅"]].head(top_n)
-        # 重命名涨跌幅列名统一
-        result = result.rename(columns={change_col: "涨跌幅(%)"})
-        return result
-    except Exception as e:
-        print(f"获取个股数据失败: {e}")
-        return None
+def get_top10_industry_sector():
+    """获取东方财富行业板块 当日涨幅TOP10"""
+    # 板块列表接口：不支持任何额外参数，直接调用
+    df_sector = fetch_with_retry(ak.stock_board_industry_name_em)
+    if df_sector.empty:
+        return pd.DataFrame()
 
-def save_to_csv(data, filename):
-    """保存数据到CSV文件（可选）"""
-    if data is not None and not data.empty:
-        data.to_csv(filename, index=False, encoding="utf-8-sig")
-        print(f"数据已保存至: {filename}")
+    # 清洗涨跌幅字段
+    df_sector["涨跌幅"] = df_sector["涨跌幅"].apply(safe_convert_num)
+    # 剔除无效数据
+    df_sector = df_sector.dropna(subset=["涨跌幅"])
+    df_sector = df_sector[df_sector["涨跌幅"] != 0]
+    if df_sector.empty:
+        print("无有效板块数据")
+        return pd.DataFrame()
 
-# ================== 主程序 ==================
+    # 按涨幅降序，取前10名
+    df_sector = df_sector.sort_values(by="涨跌幅", ascending=False)
+    top10 = df_sector.head(10).reset_index(drop=True)
+    return top10[["板块名称", "涨跌幅"]]
 
-def main():
-    print("=" * 80)
-    print(f"          当日热点板块 & 涨幅前十股票  ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
-    print("=" * 80)
 
-    # 1. 行业板块 TOP10
-    print("\n🔥【行业板块涨幅榜 TOP10】")
-    industry_df = get_top_industry_sectors(10)
-    if industry_df is not None:
-        print(industry_df.to_string(index=False))
-        save_to_csv(industry_df, f"industry_top10_{datetime.now().strftime('%Y%m%d')}.csv")
+def get_sector_top10_stocks(sector_name):
+    """根据板块名称，获取板块内涨幅TOP10个股"""
 
-    # 2. 概念板块 TOP10
-    print("\n🔥【概念板块涨幅榜 TOP10】")
-    concept_df = get_top_concept_sectors(10)
-    if concept_df is not None:
-        print(concept_df.to_string(index=False))
-        save_to_csv(concept_df, f"concept_top10_{datetime.now().strftime('%Y%m%d')}.csv")
+    # 成分股接口：仅传入板块名称，不使用timeout
+    def get_stock_data():
+        return ak.stock_board_industry_cons_em(symbol=sector_name)
 
-    # 3. 全市场涨幅前十股票
-    print("\n📈【全市场涨幅前十股票】")
-    stocks_df = get_top_stocks(10)
-    if stocks_df is not None:
-        print(stocks_df.to_string(index=False))
-        save_to_csv(stocks_df, f"stocks_top10_{datetime.now().strftime('%Y%m%d')}.csv")
+    df_stock = fetch_with_retry(get_stock_data)
+    if df_stock.empty:
+        return pd.DataFrame()
 
-    print("\n✅ 查询完成！")
+    # 清洗价格、涨跌幅
+    df_stock["涨跌幅"] = df_stock["涨跌幅"].apply(safe_convert_num)
+    df_stock["最新价"] = df_stock["最新价"].apply(safe_convert_num)
+
+    # 过滤无效数据
+    df_stock = df_stock.dropna(subset=["涨跌幅", "最新价"])
+    if df_stock.empty:
+        return pd.DataFrame()
+
+    # 按涨幅降序取前10
+    df_stock = df_stock.sort_values(by="涨跌幅", ascending=False)
+    top10_stock = df_stock.head(10).reset_index(drop=True)
+    return top10_stock[["代码", "名称", "最新价", "涨跌幅"]]
+
 
 if __name__ == "__main__":
-    main()
+    print("=" * 65)
+    print("📈 A股行业板块涨幅TOP10监控（东方财富数据源）")
+    print("=" * 65)
+
+    # 1. 获取涨幅前十板块
+    top_sectors = get_top10_industry_sector()
+    if top_sectors.empty:
+        print("❌ 未能获取板块数据，请检查网络或在A股交易时段(9:30-15:00)运行")
+    else:
+        # 遍历每个TOP10板块
+        for rank, row in top_sectors.iterrows():
+            current_rank = rank + 1
+            board_name = row["板块名称"]
+            board_change = row["涨跌幅"]
+
+            print(f"\n【第{current_rank}名】板块：{board_name} | 板块涨幅：{board_change:.2f}%")
+            print("-" * 55)
+
+            # 2. 获取板块内涨幅前十个股
+            stock_list = get_sector_top10_stocks(board_name)
+            if stock_list.empty:
+                print("  暂无有效个股数据")
+                continue
+
+            # 打印个股信息
+            for s_rank, s_row in stock_list.iterrows():
+                s_num = s_rank + 1
+                code = s_row["代码"]
+                name = s_row["名称"]
+                price = s_row["最新价"]
+                change = s_row["涨跌幅"]
+                print(f"  {s_num}. {code} {name:8s} | 现价:{price:6.2f} | 涨幅:{change:+.2f}%")
+
+    print("\n" + "=" * 65)
+    print("✅ 本轮数据采集完成")
