@@ -19,9 +19,10 @@ holdings = {
     "600422": {"name": "昆药集团", "buy_price": 21.0619, "shares": 600},
     "600879": {"name": "航天电子", "buy_price": 26.2661, "shares": 700},
     "601066": {"name": "中信建投", "buy_price": 27.6302, "shares": 3400},
-    "002716": {"name": "湖南白银", "buy_price": 19.3681, "shares": 1000},
+    "002716": {"name": "湖南白银", "buy_price": 18.3681, "shares": 1000},
     "300589": {"name": "江龙船艇", "buy_price": 22.8225, "shares": 1200},
-    "300129": {"name": "泰胜风能", "buy_price": 14.9016, "shares": 2300}
+    "300129": {"name": "泰胜风能", "buy_price": 14.9016, "shares": 2300},
+    "600172": {"name": "黄河旋风", "buy_price": 12.2123, "shares": 600},
 }
 my_codes = list(holdings.keys())
 
@@ -45,12 +46,14 @@ COL_WIDTHS = {
 }
 HEADERS = ["代码", "名称", "最新价", "购入价", "持仓数", "总盈亏(元)", "总盈亏率", "当日盈亏(元)", "当日盈亏率"]
 
+
 def visible_width(text):
     """计算字符串的实际显示宽度（忽略 ANSI 颜色代码）"""
     # 移除颜色代码
     clean = re.sub(r'\033\[[0-9;]*m', '', str(text))
     width = wcswidth(clean)
     return width if width >= 0 else len(clean)
+
 
 def pad_cell(content, width, align='left'):
     """
@@ -69,6 +72,7 @@ def pad_cell(content, width, align='left'):
         # 内容前加空格（右对齐）
         return ' ' * pad + content
 
+
 def color_num(value, fmt="{:.2f}", suffix=""):
     """根据数值正负返回带颜色的字符串（正红负绿）"""
     if value > 0:
@@ -79,11 +83,13 @@ def color_num(value, fmt="{:.2f}", suffix=""):
         return f"{fmt.format(value)}{suffix}"
     return f"{color}{fmt.format(value)}{suffix}{RESET}"
 
+
 def extract_code_from_line(line):
     match = re.search(r'hq_str_(sh\d+|sz\d+)', line)
     if match:
         return match.group(1)[2:]
     return None
+
 
 def fetch_data_with_retry(max_retries=3, retry_delay=5):
     for attempt in range(max_retries):
@@ -129,10 +135,11 @@ def fetch_data_with_retry(max_retries=3, retry_delay=5):
             df = df[df["股票代码"].isin(my_codes)]
             return df
         except Exception as e:
-            print(f"请求失败 ({attempt+1}/{max_retries}): {e}")
+            print(f"请求失败 ({attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
     raise Exception("获取数据失败")
+
 
 # ====================== 主循环 ======================
 while True:
