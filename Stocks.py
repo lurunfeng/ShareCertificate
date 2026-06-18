@@ -23,6 +23,11 @@ holdings = {
     "300589": {"name": "江龙船艇", "buy_price": 22.8225, "shares": 1200},
     "300129": {"name": "泰胜风能", "buy_price": 14.9016, "shares": 2300},
     "600172": {"name": "黄河旋风", "buy_price": 12.2123, "shares": 600},
+    "600115": {"name": "东方航空", "buy_price": 4.0, "shares": 600},
+    "600745": {"name": "闻泰科技", "buy_price": 18.6687, "shares": 800},
+    "601398": {"name": "工商银行", "buy_price": 7.9, "shares": 800},
+    "603399": {"name": "永衫锂电", "buy_price": 20.0, "shares": 500},
+    "688055": {"name": "龙腾光电", "buy_price": 5.47, "shares": 500},
 }
 my_codes = list(holdings.keys())
 
