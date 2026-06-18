@@ -8,7 +8,7 @@ from wcwidth import wcswidth
 
 # ====================== 持仓数据 ======================
 holdings = {
-    "300323": {"name": "华灿光电", "buy_price": 16.6114, "shares": 1600},
+    "300323": {"name": "华灿光电", "buy_price": 16.6164, "shares": 1600},
     "600740": {"name": "山西焦化", "buy_price": 4.1541, "shares": 1800},
     "000751": {"name": "锌业股份", "buy_price": 4.8581, "shares": 4300},
     "601990": {"name": "南京证券", "buy_price": 9.9227, "shares": 500},
