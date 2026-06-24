@@ -10,7 +10,7 @@ from wcwidth import wcswidth
 holdings = {
     "300323": {"name": "华灿光电", "buy_price": 16.6164, "shares": 1600},
     "600740": {"name": "山西焦化", "buy_price": 4.1541, "shares": 1800},
-    "000751": {"name": "锌业股份", "buy_price": 4.8581, "shares": 4300},
+    "000751": {"name": "锌业股份", "buy_price": 4.8581, "shares": 0},
     "601990": {"name": "南京证券", "buy_price": 9.9227, "shares": 500},
     "600059": {"name": "古越龙山", "buy_price": 10.9008, "shares": 1000},
     "000019": {"name": "深粮控股", "buy_price": 9.6507, "shares": 1000},
@@ -22,12 +22,13 @@ holdings = {
     "002716": {"name": "湖南白银", "buy_price": 18.3681, "shares": 1000},
     "300589": {"name": "江龙船艇", "buy_price": 22.8225, "shares": 1200},
     "300129": {"name": "泰胜风能", "buy_price": 14.9016, "shares": 2300},
-    "600172": {"name": "黄河旋风", "buy_price": 12.2123, "shares": 600},
-    "600115": {"name": "东方航空", "buy_price": 4.0, "shares": 600},
+    "600172": {"name": "黄河旋风", "buy_price": 12.2123, "shares": 0},
+    "600115": {"name": "东方航空", "buy_price": 3.8, "shares": 0},
     "600745": {"name": "闻泰科技", "buy_price": 18.6687, "shares": 800},
-    "601398": {"name": "工商银行", "buy_price": 7.9, "shares": 800},
-    "603399": {"name": "永衫锂电", "buy_price": 20.0, "shares": 500},
-    "688055": {"name": "龙腾光电", "buy_price": 5.47, "shares": 500},
+    "601398": {"name": "工商银行", "buy_price": 7.9, "shares": 0},
+    "603399": {"name": "永衫锂电", "buy_price": 20.0, "shares": 0},
+    "688055": {"name": "龙腾光电", "buy_price": 5.47, "shares": 0},
+    "600598": {"name": "北大荒", "buy_price": 12.47, "shares": 0},
 }
 my_codes = list(holdings.keys())
 
