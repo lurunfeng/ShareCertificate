@@ -29,6 +29,7 @@ holdings = {
     "603399": {"name": "永衫锂电", "buy_price": 20.0, "shares": 0},
     "688055": {"name": "龙腾光电", "buy_price": 5.47, "shares": 0},
     "600598": {"name": "北大荒", "buy_price": 12.47, "shares": 0},
+    "000725": {"name": "京东方A", "buy_price": 12.47, "shares": 0},
 }
 my_codes = list(holdings.keys())
 
