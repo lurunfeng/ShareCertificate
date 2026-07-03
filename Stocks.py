@@ -29,7 +29,7 @@ holdings = {
     "603399": {"name": "永衫锂电", "buy_price": 20.0, "shares": 0},
     "688055": {"name": "龙腾光电", "buy_price": 5.47, "shares": 0},
     "600598": {"name": "北大荒", "buy_price": 12.47, "shares": 0},
-    "000725": {"name": "京东方A", "buy_price": 12.47, "shares": 0},
+    "000725": {"name": "京东方A", "buy_price": 8.5585, "shares": 1700},
     "600360": {"name": "华微电子", "buy_price": 14.6146, "shares": 2000},
     "601872": {"name": "招商轮船", "buy_price": 14.6146, "shares": 0},
 }

@@ -12,14 +12,15 @@ import pandas as pd
 from datetime import datetime
 
 # ================== 配置 ==================
-THRESHOLD = 5      # 涨幅阈值（%）
+THRESHOLD = 5  # 涨幅阈值（%）
 
 # pandas 显示配置：不限制最大行数，不限制列宽
-pd.set_option('display.max_rows', None)       # 显示所有行
-pd.set_option('display.max_columns', None)    # 显示所有列
-pd.set_option('display.width', 200)           # 控制台宽度
+pd.set_option('display.max_rows', None)  # 显示所有行
+pd.set_option('display.max_columns', None)  # 显示所有列
+pd.set_option('display.width', 200)  # 控制台宽度
 pd.set_option('display.unicode.ambiguous_as_wide', True)
 pd.set_option('display.unicode.east_asian_width', True)
+
 
 # ================== 新浪接口 ==================
 def fetch_top_gainers(page=1, num=80):
@@ -33,9 +34,9 @@ def fetch_top_gainers(page=1, num=80):
     params = {
         "page": page,
         "num": num,
-        "sort": "changepercent",   # 按涨跌幅排序
-        "asc": 0,                  # 降序
-        "node": "hs_a",            # 沪深A股
+        "sort": "changepercent",  # 按涨跌幅排序
+        "asc": 0,  # 降序
+        "node": "hs_a",  # 沪深A股
         "_s_r_a": "init"
     }
     headers = {
@@ -69,6 +70,7 @@ def fetch_top_gainers(page=1, num=80):
     df["换手率"] = pd.to_numeric(df["换手率"], errors="coerce")
     return df
 
+
 def get_all_gainers(threshold=5, max_pages=20):
     """
     通过分页获取所有涨幅超过 threshold 的股票
@@ -97,6 +99,7 @@ def get_all_gainers(threshold=5, max_pages=20):
         return None
     return pd.concat(all_stocks, ignore_index=True)
 
+
 def main():
     print("=" * 80)
     print(f"         全市场涨幅超过 {THRESHOLD}% 的股票查询  ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
@@ -117,6 +120,11 @@ def main():
 
         # 格式化输出列
         out_df = gain_df[["代码", "名称", "最新价", "涨跌幅", "成交量", "成交额", "换手率"]].copy()
+
+        # 新增序号列（从1开始）
+        out_df.insert(0, "序号", range(1, len(out_df) + 1))
+
+        # 格式化数值显示
         out_df["最新价"] = out_df["最新价"].map(lambda x: f"{x:.2f}")
         out_df["涨跌幅"] = out_df["涨跌幅"].map(lambda x: f"{x:.2f}%")
         out_df["成交量"] = out_df["成交量"].map(lambda x: f"{x:.0f}")
@@ -131,6 +139,7 @@ def main():
     except Exception as e:
         print(f"\n❌ 程序运行失败: {e}")
         print("可能原因：网络问题或新浪接口变更。请稍后重试。")
+
 
 if __name__ == "__main__":
     main()
