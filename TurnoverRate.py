@@ -1,6 +1,6 @@
 """
-休市后查询当日换手率≥5%，数据源东方财富
-解决RemoteDisconnected远程断开，兼容低版本akshare（删除set_option）
+休市后查询当日换手率≥5%，数据源东方财富/新浪（自动轮换）
+解决RemoteDisconnected远程断开，兼容低版本akshare
 功能：分批读取缓存、高换手筛选、近5日K线、Excel多sheet导出
 """
 import akshare as ak
@@ -14,7 +14,7 @@ from requests.exceptions import ConnectionError, Timeout
 
 warnings.filterwarnings("ignore")
 
-# ==================== 配置区（防风控调低压力） ====================
+# ==================== 配置区 ====================
 TARGET_DATE = "2026-07-03"
 TURNOVER_THRESHOLD = 5.0
 HISTORY_DAYS = 5
@@ -25,10 +25,8 @@ BATCH_SIZE = 5
 BATCH_INTERVAL_MIN = 60
 BATCH_INTERVAL_MAX = 90
 
-# 全局行情缓存，只请求一次网络，降低风控
 GLOBAL_SPOT_CACHE = None
 
-# 浏览器请求头伪装，兼容所有ak版本，不再用ak.set_option
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
@@ -36,13 +34,11 @@ HEADERS = {
     "Connection": "keep-alive"
 }
 
-# 全局requests会话统一UA，替代ak.set_option
 session = requests.Session()
 session.headers.update(HEADERS)
 requests.session = lambda: session
 
 def check_trading_day(date_str: str) -> tuple[bool, str]:
-    """自动校验交易日，非交易日自动向前匹配最近开盘日"""
     try:
         df = ak.tool_trade_date_hist_sina()
         trade_days = pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d").tolist()
@@ -61,33 +57,80 @@ def check_trading_day(date_str: str) -> tuple[bool, str]:
         print(f"⚠️ 交易日历接口异常，沿用原日期：{e}")
         return True, date_str
 
+def find_column(df, keywords):
+    """在DataFrame列名中查找包含任一关键词的列，返回第一个匹配的列名，否则返回None"""
+    for col in df.columns:
+        for kw in keywords:
+            if kw in col or col.lower() in kw.lower():
+                return col
+    return None
+
 def load_all_spot_cache(target_dt: str):
-    """东方财富全市场行情，移除ak.set_option，无版本报错"""
     global GLOBAL_SPOT_CACHE
     if GLOBAL_SPOT_CACHE is not None:
         return GLOBAL_SPOT_CACHE
 
-    print("🔁 一次性加载东方财富全市场行情缓存（仅1次网络请求）...")
-    for rt in range(RETRY_TIMES):
-        try:
-            # 东财稳定接口，原生自带换手率字段
-            df = ak.stock_zh_a_spot_em()
-            df["代码"] = df["代码"].astype(str)
-            # 东财换手率原生百分比，无需*100
-            df["换手率"] = pd.to_numeric(df["换手率"], errors="coerce")
-            GLOBAL_SPOT_CACHE = df
-            print(f"✅ 行情缓存加载完成，合计{len(df)}只股票")
-            return GLOBAL_SPOT_CACHE
-        except (ConnectionError, Timeout, Exception) as e:
-            wait = 5 * (rt + 1)
-            err_msg = str(e)[:100]
-            print(f"⚠️ 第{rt+1}次拉取失败，等待{wait}秒重试：{err_msg}")
-            time.sleep(wait)
-    print("❌ 多次连接被断开，切换手机热点或晚间21点后运行")
+    # 数据源列表
+    sources = [
+        ("东方财富", ak.stock_zh_a_spot_em),
+        ("新浪", ak.stock_zh_a_spot),
+    ]
+
+    for source_name, source_func in sources:
+        if source_func is None:
+            print(f"⚠️ {source_name} 接口不可用，跳过")
+            continue
+
+        print(f"🔁 尝试 {source_name} 接口...")
+        for rt in range(RETRY_TIMES):
+            try:
+                df = source_func()
+                print(f"   {source_name} 返回列名: {list(df.columns)}")  # 调试信息
+
+                # 查找代码列
+                code_col = find_column(df, ["代码", "code", "symbol", "股票代码"])
+                if code_col is None:
+                    print(f"⚠️ {source_name} 无代码列，跳过")
+                    break
+                if code_col != "代码":
+                    df.rename(columns={code_col: "代码"}, inplace=True)
+
+                # 查找换手率列（模糊匹配）
+                turnover_col = find_column(df, ["换手", "turnover", "turnoverratio", "换手率"])
+                if turnover_col is None:
+                    print(f"⚠️ {source_name} 无换手率字段，请检查列名: {list(df.columns)}")
+                    break
+                if turnover_col != "换手率":
+                    df.rename(columns={turnover_col: "换手率"}, inplace=True)
+
+                # 标准化代码类型
+                df["代码"] = df["代码"].astype(str)
+                # 转换换手率（可能带%）
+                df["换手率"] = df["换手率"].astype(str).str.replace("%", "").str.strip()
+                df["换手率"] = pd.to_numeric(df["换手率"], errors="coerce")
+
+                # 判断单位：如果最大换手率 <= 1，则乘以100（视为小数）
+                if not df["换手率"].isnull().all():
+                    max_val = df["换手率"].max()
+                    if max_val <= 1:
+                        df["换手率"] = df["换手率"] * 100
+
+                GLOBAL_SPOT_CACHE = df
+                print(f"✅ {source_name} 缓存加载成功，合计{len(df)}只股票")
+                return GLOBAL_SPOT_CACHE
+
+            except (ConnectionError, Timeout, Exception) as e:
+                wait = 5 * (rt + 1)
+                err_msg = str(e)[:100]
+                print(f"⚠️ {source_name} 第{rt+1}次失败，等待{wait}s重试：{err_msg}")
+                time.sleep(wait)
+        print(f"❌ {source_name} 多次失败，切换下一数据源")
+
+    print("❌ 所有数据源均失败，请检查网络或稍后重试")
+    print("💡 建议：切换网络环境（如手机热点）或使用代理后重试")
     return pd.DataFrame()
 
 def get_single_spot(code: str, target_dt: str):
-    """从内存缓存读取，不重复请求网络"""
     df_cache = load_all_spot_cache(target_dt)
     if df_cache.empty:
         return None
@@ -97,7 +140,6 @@ def get_single_spot(code: str, target_dt: str):
     return row.iloc[0].to_dict()
 
 def get_all_stock_code() -> pd.DataFrame:
-    """获取沪深主板、创业板股票代码"""
     print("📋 加载A股代码列表...")
     try:
         df = ak.stock_info_a_code_name()
@@ -106,7 +148,6 @@ def get_all_stock_code() -> pd.DataFrame:
         df = ak.stock_info_a_code_name_csindex()
     df.columns = ["代码", "名称"]
     df["代码"] = df["代码"].astype(str)
-    # 筛选60沪市、00深主板、30创业板
     df = df[df["代码"].str.match(r"^(60|00|30)\d{4}$")]
     print(f"✅ 筛选完成，共{len(df)}只A股")
     return df
@@ -165,7 +206,6 @@ def get_all_spot_safe(code_df: pd.DataFrame, target_dt: str):
     return pd.concat(all_results, ignore_index=True)
 
 def filter_by_turnover(df: pd.DataFrame):
-    """按设定换手率阈值筛选股票"""
     if "换手率" not in df.columns:
         print("❌ 数据缺失换手率字段，无法筛选")
         return pd.DataFrame()
@@ -177,7 +217,6 @@ def filter_by_turnover(df: pd.DataFrame):
     return target_df
 
 def get_history_data(symbol: str, target_dt: str):
-    """获取单只股票近N日日线数据"""
     try:
         end_dt = datetime.strptime(target_dt, "%Y-%m-%d")
         start_dt = end_dt - timedelta(days=HISTORY_DAYS * 5)
@@ -220,7 +259,6 @@ def fetch_history_batch(stock_df: pd.DataFrame, target_dt: str):
             time.sleep(wait_t)
     return out_dict
 
-# ==================== 主程序 ====================
 def main():
     global TARGET_DATE
     print("=" * 70)
@@ -234,35 +272,29 @@ def main():
     TARGET_DATE = real_target
     print(f"✅ 生效交易日：{TARGET_DATE}")
 
-    # 1 获取股票代码
     code_df = get_all_stock_code()
     if code_df.empty:
         print("❌ 无法获取股票代码，程序退出")
         return
 
-    # 2 一次性加载全市场缓存，仅一次网络请求
     all_spot = get_all_spot_safe(code_df, TARGET_DATE)
     if all_spot.empty:
         print("❌ 未获取到行情数据，程序退出")
         return
 
-    # 3 筛选高换手
     filter_df = filter_by_turnover(all_spot)
     if filter_df.empty:
         print(f"\n📉 当日没有换手率大于等于{TURNOVER_THRESHOLD}%的股票")
         return
 
-    # 4 批量拉取历史K线
     print("\n" + "-" * 70 + "\n开始获取个股近5日历史数据\n" + "-" * 70)
     stock_history = fetch_history_batch(filter_df)
 
-    # 控制台打印汇总
     print("\n" + "=" * 70 + "\n筛选结果汇总\n" + "=" * 70)
     show_cols = ["代码", "名称", "最新价", "涨跌幅", "换手率"]
     show_cols = [c for c in show_cols if c in filter_df.columns]
     print(filter_df[show_cols].head(20).to_string(index=False))
 
-    # 打印前10只明细
     print(f"\n前10只股票近{HISTORY_DAYS}日行情明细：")
     show_limit = 10
     cnt = 0
@@ -282,7 +314,6 @@ def main():
             vol_yi = r["成交额"] / 1e8
             print(f"   {d_str} 收盘{r['收盘']:.2f} 换手{r['换手率']:.2f}% 成交额{vol_yi:.2f}亿")
 
-    # 导出Excel
     try:
         file_name = f"高换手股票_{TARGET_DATE}.xlsx"
         with pd.ExcelWriter(file_name, engine="openpyxl") as w:
@@ -307,7 +338,6 @@ def main():
                     })
             if history_total:
                 pd.DataFrame(history_total).to_excel(w, sheet_name="历史数据总表", index=False)
-            # 最多20个个股独立sheet
             write_cnt = 0
             for c, val in stock_history.items():
                 if write_cnt >= 20 or val["历史数据"].empty:
