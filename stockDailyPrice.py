@@ -69,5 +69,5 @@ def stock_price_analysis(stock_code: str):
     return df_30d, top20_low, df_low20
 
 if __name__ == "__main__":
-    target_code = "600982"
+    target_code = "002716"
     stock_price_analysis(target_code)
